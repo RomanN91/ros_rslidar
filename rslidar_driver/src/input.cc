@@ -25,10 +25,16 @@
  */
 #include "input.h"
 
+#include <cstring>
+#include <iostream>
+#include <poll.h>
+#include <signal.h>
+#include <cmath>
+
 extern volatile sig_atomic_t flag;
 namespace rslidar_driver
 {
-static const size_t packet_size = sizeof(rslidar_msgs::rslidarPacket().data);
+static const size_t packet_size = sizeof(LidarPacket);  // rslidar_msgs::rslidarPacket().data);
 
 ////////////////////////////////////////////////////////////////////////
 // Input base class implementation
@@ -36,14 +42,15 @@ static const size_t packet_size = sizeof(rslidar_msgs::rslidarPacket().data);
 
 /** @brief constructor
  *
- *  @param private_nh ROS private handle for calling node.
+ *  @param device_ip.
  *  @param port UDP port number.
  */
-Input::Input(ros::NodeHandle private_nh, uint16_t port) : private_nh_(private_nh), port_(port)
+Input::Input(/*ros::NodeHandle private_nh, */const std::string& device_ip, uint16_t port) : devip_str_(device_ip), port_(port)
 {
-  private_nh.param("device_ip", devip_str_, std::string(""));
+  // private_nh.param("device_ip", devip_str_, std::string(""));
   if (!devip_str_.empty())
-    ROS_INFO_STREAM("Only accepting packets from IP address: " << devip_str_);
+      std::cout << "Only accepting packets from IP address: " << devip_str_ << std::endl;
+    // ROS_INFO_STREAM("Only accepting packets from IP address: " << devip_str_);
 }
 
 ////////////////////////////////////////////////////////////////////////
@@ -55,7 +62,7 @@ Input::Input(ros::NodeHandle private_nh, uint16_t port) : private_nh_(private_nh
    *  @param private_nh ROS private handle for calling node.
    *  @param port UDP port number
 */
-InputSocket::InputSocket(ros::NodeHandle private_nh, uint16_t port) : Input(private_nh, port)
+InputSocket::InputSocket(/*ros::NodeHandle private_nh, */const std::string& device_ip, uint16_t port) : Input(device_ip, port)
 {
   sockfd_ = -1;
 
@@ -64,7 +71,10 @@ InputSocket::InputSocket(ros::NodeHandle private_nh, uint16_t port) : Input(priv
     inet_aton(devip_str_.c_str(), &devip_);
   }
 
-  ROS_INFO_STREAM("Opening UDP socket: port " << port);
+  // ROS_INFO_STREAM("Opening UDP socket: port " << port);
+
+  std::cout << "Opening UDP socket: port " << port << std::endl;
+
   sockfd_ = socket(PF_INET, SOCK_DGRAM, 0);
   if (sockfd_ == -1)
   {
@@ -105,9 +115,11 @@ InputSocket::~InputSocket(void)
 }
 
 /** @brief Get one rslidar packet. */
-int InputSocket::getPacket(rslidar_msgs::rslidarPacket* pkt, const double time_offset)
+int InputSocket::getPacket(LidarPacket* pkt, const double time_offset)
 {
-  double time1 = ros::Time::now().toSec();
+  // double time1 = ros::Time::now().toSec();
+  ///  time_t time1 = time(NULL);
+  double time1 = get_current_time();
   struct pollfd fds[1];
   fds[0].fd = sockfd_;
   fds[0].events = POLLIN;
@@ -126,12 +138,14 @@ int InputSocket::getPacket(rslidar_msgs::rslidarPacket* pkt, const double time_o
       if (retval < 0)  // poll() error?
       {
         if (errno != EINTR)
-          ROS_ERROR("poll() error: %s", strerror(errno));
+          // ROS_ERROR("poll() error: %s", strerror(errno));
+            std::cerr << "poll() error: %s" << strerror(errno) << std::endl;
         return 1;
       }
       if (retval == 0)  // poll() timeout?
       {
-        ROS_WARN("Rslidar poll() timeout");
+        // ROS_WARN("Rslidar poll() timeout");
+        std::cout << "Rslidar poll() timeout" << std::endl;
 
         char buffer_data[8] = "re-con";
         memset(&sender_address, 0, sender_address_len);          // initialize to zeros
@@ -143,7 +157,8 @@ int InputSocket::getPacket(rslidar_msgs::rslidarPacket* pkt, const double time_o
       }
       if ((fds[0].revents & POLLERR) || (fds[0].revents & POLLHUP) || (fds[0].revents & POLLNVAL))  // device error?
       {
-        ROS_ERROR("poll() reports Rslidar error");
+        // ROS_ERROR("poll() reports Rslidar error");
+        std::cout << "poll() reports Rslidar error" << std::endl;
         return 1;
       }
     } while ((fds[0].revents & POLLIN) == 0);
@@ -154,7 +169,8 @@ int InputSocket::getPacket(rslidar_msgs::rslidarPacket* pkt, const double time_o
       if (errno != EWOULDBLOCK)
       {
         perror("recvfail");
-        ROS_INFO("recvfail");
+        // ROS_INFO("recvfail");
+        std::cout << "recvfail" << std::endl;
         return 1;
       }
     }
@@ -166,7 +182,8 @@ int InputSocket::getPacket(rslidar_msgs::rslidarPacket* pkt, const double time_o
         break;  // done
     }
 
-    ROS_DEBUG_STREAM("incomplete rslidar packet read: " << nbytes << " bytes");
+    // ROS_DEBUG_STREAM("incomplete rslidar packet read: " << nbytes << " bytes");
+    std::cout << "incomplete rslidar packet read: " << nbytes << " bytes" << std::endl;
   }
   if (flag == 0)
   {
@@ -174,15 +191,18 @@ int InputSocket::getPacket(rslidar_msgs::rslidarPacket* pkt, const double time_o
   }
   // Average the times at which we begin and end reading.  Use that to
   // estimate when the scan occurred. Add the time offset.
-  double time2 = ros::Time::now().toSec();
-  pkt->stamp = ros::Time((time2 + time1) / 2.0 + time_offset);
-
+  /// double time2 = ros::Time::now().toSec();
+  /// pkt->stamp = ros::Time((time2 + time1) / 2.0 + time_offset);
+  double time2 = get_current_time();
+  pkt->stamp = ((time2 + time1) / 2.0 + time_offset);
   return 0;
 }
 
 ////////////////////////////////////////////////////////////////////////
 // InputPCAP class implementation
 ////////////////////////////////////////////////////////////////////////
+
+
 
 /** @brief constructor
    *
@@ -191,31 +211,41 @@ int InputSocket::getPacket(rslidar_msgs::rslidarPacket* pkt, const double time_o
    *  @param packet_rate expected device packet frequency (Hz)
    *  @param filename PCAP dump file name
    */
-InputPCAP::InputPCAP(ros::NodeHandle private_nh, uint16_t port, double packet_rate, std::string filename,
+InputPCAP::InputPCAP(/*ros::NodeHandle private_nh,*/const LidarConfig& lidar_config, const std::string& device_ip, uint16_t port,
+                     double packet_rate, std::string filename,
                      bool read_once, bool read_fast, double repeat_delay)
-  : Input(private_nh, port), packet_rate_(packet_rate), filename_(filename)
+  : Input(device_ip, port), packet_rate_(packet_rate), filename_(filename)
 {
   pcap_ = NULL;
   empty_ = true;
 
   // get parameters using private node handle
-  private_nh.param("read_once", read_once_, false);
-  private_nh.param("read_fast", read_fast_, false);
-  private_nh.param("repeat_delay", repeat_delay_, 0.0);
+  // private_nh.param("read_once", read_once_, false);
+  // private_nh.param("read_fast", read_fast_, false);
+  // private_nh.param("repeat_delay", repeat_delay_, 0.0);
+
+  read_once_ = lidar_config.read_once;
+  read_fast_ = lidar_config.read_fast;
+  repeat_delay_ = lidar_config.repeat_delay;
 
   if (read_once_)
-    ROS_INFO("Read input file only once.");
+    // ROS_INFO("Read input file only once.");
+    std::cout << "Read input file only once." << std::endl;
   if (read_fast_)
-    ROS_INFO("Read input file as quickly as possible.");
+    // ROS_INFO("Read input file as quickly as possible.");
+    std::cout << "Read input file as quickly as possible." << std::endl;
   if (repeat_delay_ > 0.0)
-    ROS_INFO("Delay %.3f seconds before repeating input file.", repeat_delay_);
+    // ROS_INFO("Delay %.3f seconds before repeating input file.", repeat_delay_);
+    std::cout << "Delay " << repeat_delay_ << " seconds before repeating input file." << std::endl;
 
   // Open the PCAP dump file
   // ROS_INFO("Opening PCAP file \"%s\"", filename_.c_str());
-  ROS_INFO_STREAM("Opening PCAP file " << filename_);
+  /// ROS_INFO_STREAM("Opening PCAP file " << filename_);
+  std::cout << "Opening PCAP file " << filename_ << std::endl;
   if ((pcap_ = pcap_open_offline(filename_.c_str(), errbuf_)) == NULL)
   {
-    ROS_FATAL("Error opening rslidar socket dump file.");
+    // ROS_FATAL("Error opening rslidar socket dump file.");
+    std::cout << "Error opening rslidar socket dump file." << std::endl;
     return;
   }
 
@@ -235,7 +265,7 @@ InputPCAP::~InputPCAP(void)
 }
 
 /** @brief Get one rslidar packet. */
-int InputPCAP::getPacket(rslidar_msgs::rslidarPacket* pkt, const double time_offset)
+int InputPCAP::getPacket(LidarPacket* pkt, const double time_offset)
 {
   struct pcap_pkthdr* header;
   const u_char* pkt_data;
@@ -252,10 +282,10 @@ int InputPCAP::getPacket(rslidar_msgs::rslidarPacket* pkt, const double time_off
 
       // Keep the reader from blowing through the file.
       if (read_fast_ == false)
-        packet_rate_.sleep();
+        packet_rate_._sleep();
 
       memcpy(&pkt->data[0], pkt_data + 42, packet_size);
-      pkt->stamp = ros::Time::now();  // time_offset not considered here, as no
+      pkt->stamp = time(NULL);  // ros::Time::now();  // time_offset not considered here, as no
                                       // synchronization required
       empty_ = false;
       return 0;  // success
@@ -263,23 +293,27 @@ int InputPCAP::getPacket(rslidar_msgs::rslidarPacket* pkt, const double time_off
 
     if (empty_)  // no data in file?
     {
-      ROS_WARN("Error %d reading rslidar packet: %s", res, pcap_geterr(pcap_));
+      // ROS_WARN("Error %d reading rslidar packet: %s", res, pcap_geterr(pcap_));
+      std::cout << "Error " << res << " reading rslidar packet: " << pcap_geterr(pcap_) << std::endl;
       return -1;
     }
 
     if (read_once_)
     {
-      ROS_INFO("end of file reached -- done reading.");
+      // ROS_INFO("end of file reached -- done reading.");
+      std::cout << "end of file reached -- done reading." << std::endl;
       return -1;
     }
 
     if (repeat_delay_ > 0.0)
     {
-      ROS_INFO("end of file reached -- delaying %.3f seconds.", repeat_delay_);
+      // ROS_INFO("end of file reached -- delaying %.3f seconds.", repeat_delay_);
+      std::cout << "end of file reached -- delaying " << repeat_delay_ << " seconds." << std::endl;
       usleep(rint(repeat_delay_ * 1000000.0));
     }
 
-    ROS_DEBUG("replaying rslidar dump file");
+    // ROS_DEBUG("replaying rslidar dump file");
+    std::cout << "replaying rslidar dump file" << std::endl;
 
     // I can't figure out how to rewind the file, because it
     // starts with some kind of header.  So, close the file

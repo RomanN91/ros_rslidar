@@ -45,3 +45,5 @@ ENV/
 *.pcap
 *.pcd
 *.bag
+
+CMakeLists.txt.user

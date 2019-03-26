@@ -16,19 +16,32 @@
 #define _RSDRIVER_H_
 
 #include <string>
-#include <ros/ros.h>
-#include <ros/package.h>
-#include <diagnostic_updater/diagnostic_updater.h>
-#include <diagnostic_updater/publisher.h>
-#include <dynamic_reconfigure/server.h>
-#include <rslidar_driver/rslidarNodeConfig.h>
-#include <pcl/point_types.h>
-#include <pcl_ros/impl/transforms.hpp>
-#include <pcl_conversions/pcl_conversions.h>
+//#include <ros/ros.h>
+//#include <ros/package.h>
+//#include <diagnostic_updater/diagnostic_updater.h>
+//#include <diagnostic_updater/publisher.h>
+//#include <dynamic_reconfigure/server.h>
+//#include <rslidar_driver/rslidarNodeConfig.h>
+//#include <pcl/point_types.h>
+//#include <pcl_ros/impl/transforms.hpp>
+//#include <pcl_conversions/pcl_conversions.h>
+#include <boost/shared_ptr.hpp>
+#include <boost/thread.hpp>
 #include "input.h"
 
 namespace rslidar_driver
 {
+
+struct Header {
+    double stamp;
+    std::string frame_id;
+};
+
+struct Scan {
+    Header header;
+    std::vector<LidarPacket> packets;
+};
+
 class rslidarDriver
 {
 public:
@@ -37,21 +50,21 @@ public:
  * @param node          raw packet output topic
  * @param private_nh    通过这个节点传参数
  */
-  rslidarDriver(ros::NodeHandle node, ros::NodeHandle private_nh);
+  rslidarDriver(const LidarConfig& config/*ros::NodeHandle node, ros::NodeHandle private_nh*/);
 
   ~rslidarDriver()
   {
   }
 
-  bool poll(void);
-  void difopPoll(void);
+  boost::shared_ptr<Scan> poll(void);
+  boost::shared_ptr<Scan> difopPoll(void);
 
 private:
   /// Callback for dynamic reconfigure
-  void callback(rslidar_driver::rslidarNodeConfig& config, uint32_t level);
+  // void callback(/*rslidar_driver::rslidarNodeConfig& config*/const LidarConfig& config, uint32_t level);
 
   /// Pointer to dynamic reconfigure service srv_
-  boost::shared_ptr<dynamic_reconfigure::Server<rslidar_driver::rslidarNodeConfig> > srv_;
+  // boost::shared_ptr<dynamic_reconfigure::Server<rslidar_driver::rslidarNodeConfig> > srv_;
 
   // configuration parameters
   struct
@@ -66,14 +79,14 @@ private:
 
   boost::shared_ptr<Input> msop_input_;
   boost::shared_ptr<Input> difop_input_;
-  ros::Publisher msop_output_;
-  ros::Publisher difop_output_;
+  // ros::Publisher msop_output_;
+  // ros::Publisher difop_output_;
   // Converter convtor_;
   /** diagnostics updater */
-  diagnostic_updater::Updater diagnostics_;
+  // diagnostic_updater::Updater diagnostics_;
   double diag_min_freq_;
   double diag_max_freq_;
-  boost::shared_ptr<diagnostic_updater::TopicDiagnostic> diag_topic_;
+  // boost::shared_ptr<diagnostic_updater::TopicDiagnostic> diag_topic_;
   boost::shared_ptr<boost::thread> difop_thread_;
 };
 
